@@ -1,43 +1,80 @@
-# Current Date and Time in Anaplan
+![Anaplan-Clock](docs/banner.png)
 
-## Overview
-Anaplan doesn't have a concept of current date and time.
-A way around this is to upddate a line item using the Anaplan API on a periodic basis with what you want the current date and time to be. 
-If you want any further information on this or would want some help setting this up, get in touch and I will take you through it. 
+# Anaplan-Clock
 
-## Applications
-Some new functionality will be possible if you have the current date and time in Anaplan.
+Give Anaplan a current date and time. A small scheduled script writes "now" into a line item every minute, so formulas can know what day it is.
 
-1. Log the date and time when actions are run. To let you see how uptodate modules downstream from actions are.
-2. If you want to create snapshots of modules at specific times, the current way of doing this is to manually enter unique keys for the snapshots. The current date and time can replace this. 
+![The LatestDateTime line item in a module](LineItem.jpg)
+
+## Why I built it
+
+Anaplan has no concept of the current date and time. The model has a current period, set by hand, and that's all. Anything that needs the real clock, like stamping when an action ran or telling a user their data is three days old, has to be typed in.
+
+The fix is small. Push a timestamp in by API on a schedule. This repo is that push, packaged so it runs locally, as a cron job, or as a cloud function.
+
+## What it unlocks
+
+- Action timestamps. Copy `LatestDateTime` into a log line item as the last step of a process, and every downstream module can show when it was loaded.
+- Staleness flags. `IF Loaded Date < Latest Date - 1 THEN "Stale" ELSE "OK"` on a dashboard.
+- Snapshot keys. Key a scenario snapshot on the timestamp instead of asking users to invent unique names.
+- Working-day logic. Compare the real date with the model's current period and warn when someone is still editing last month.
+
+## How it works
+
+1. Authenticate to the Anaplan v2 API
+2. `PUT` a two-line CSV (`LatestDateTime,20/09/2026-09:42:15`) to a file in the model
+3. Run the process that imports that file into the line item
+4. Log out
+
+Timezone is configurable. The timestamp is text in `dd/mm/yyyy-HH:MM:SS` form, which you convert with `DATE` and `TEXT` functions in the model.
 
 ## Setup
-I've tried to make this setup as non-technical as possible but it does require some knowledge of the command line and maybe some familiarity with git and Python libraries to know what's happening. 
 
-1. Either download or pull the files from this repository into a directory.
+In Anaplan:
 
-```commandline
-git init
-git pull https://github.com/klameer/Anaplan-Clock.git main
+1. Create a module with one Text line item called `LatestDateTime`.
+2. Create an import action from a CSV file into that line item and wrap it in a process. Note the file ID and process ID (from the API or the URL).
+
+Locally:
+
+```bash
+git clone https://github.com/klameer/Anaplan-Clock.git
+cd Anaplan-Clock
+pip install -r requirements.txt
 ```
 
-2. In Anaplan create a module and line item to hold the date time string.
-   * The line item name is set to be LatestDateTime and is in Text format. 
-![image](LineItem.jpg)
+Fill in `.env`:
 
-3. Create an action that updates this from a csv file and get the associated File and Process Ids.
-4. In the .env file update all the variables. You can also set the timezone.
-
-5. Install the necessary libraries.
-```commandline
-pip -r requirements.txt 
+```
+user=you@company.com
+password=...
+workspaceId=...
+modelId=...
+fileId=...
+processId=...
+timezone=Europe/London
 ```
 
-5. Run the script
-```commandline
+Then:
+
+```bash
 python main.py
 ```
 
-## Automating the Process
-This script can live on your local machine or within a cloud service. I have used AWS Lambda and Google Cloud Functions. Once installed, you can run a scheduling service, if local as a chron job or also as a cloud service as AWS EventBridge or Google Cloud Scheduler. This can beset to run every minute. 
+You should see `20/09/2026-09:42:15 Updated` and the line item change in the model.
 
+## Scheduling it
+
+- Local: cron or Windows Task Scheduler, every minute or every five.
+- Google Cloud Functions: deploy the folder as is. `main.py` already exposes `run(request)` as the HTTP entry point. Trigger it from Cloud Scheduler.
+- AWS Lambda: same code, point the handler at `run`, trigger from EventBridge.
+
+Keep the credentials in the platform's secret manager rather than shipping the `.env`.
+
+## Notes
+
+- Each run is one file upload plus one process run, so it's cheap on API calls.
+- Basic auth, for readability. Swap `get_auth_token` for certificate auth in production.
+- Built on the same functions as [anaplan-api-starter](https://github.com/klameer/anaplan-api-starter).
+
+MIT licensed. I'm [Karim Lameer](https://www.linkedin.com/in/karimlameer), Master Anaplanner and CIMA-qualified accountant. I write about this at [codelessops.com](https://codelessops.com).
